@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@medisync/shared": ["../shared/src/index.ts"],
+      "@medisync/shared/*": ["../shared/src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

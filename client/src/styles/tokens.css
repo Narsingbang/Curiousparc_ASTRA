@@ -1,0 +1,24 @@
+:root {
+  --color-navy-950: #030712;
+  --color-navy-900: #050b1a;
+  --color-navy-800: #0f1b38;
+  --color-navy-700: #1a294f;
+  --color-medical-blue: #0b5fff;
+  --color-medical-cyan: #22d3ee;
+  --color-emergency-red: #e11d48;
+  --color-success-green: #10b981;
+  --color-warning-amber: #f59e0b;
+
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(226, 232, 240, 0.8);
+  --glass-shadow: 0 8px 32px 0 rgba(11, 95, 255, 0.08);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', sans-serif;
+}
+
+.dark {
+  --glass-bg: rgba(15, 27, 56, 0.85);
+  --glass-border: rgba(34, 211, 238, 0.15);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
+}

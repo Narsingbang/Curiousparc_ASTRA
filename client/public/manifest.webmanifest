@@ -1,0 +1,16 @@
+{
+  "name": "MediSync AI",
+  "short_name": "MediSync",
+  "description": "Live hospital availability and AI symptom triage",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050B1A",
+  "theme_color": "#0B5FFF",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
