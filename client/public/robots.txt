@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /vault
+Disallow: /staff
+
+Sitemap: https://medisync-ai-alpha.vercel.app/sitemap.xml
