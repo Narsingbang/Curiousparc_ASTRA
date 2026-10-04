@@ -2,6 +2,9 @@
 
 > **"Live hospital availability + AI triage, in one unified platform."**
 
+> **"team members: Rushikesh Soni(team leader), Narsing Bang, Prathmesh Talekar, Pawan Sankhala."**
+
+
 ---
 
 ## 🌟 Executive Overview
