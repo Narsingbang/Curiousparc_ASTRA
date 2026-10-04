@@ -49,14 +49,25 @@ export function createApp(): Express {
     cors({
       origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-          callback(null, true);
-        } else {
-          callback(new Error('Blocked by CORS policy'));
+          return callback(null, true);
         }
+        try {
+          const parsedUrl = new URL(origin);
+          if (
+            parsedUrl.hostname.endsWith('.vercel.app') ||
+            parsedUrl.hostname === 'localhost' ||
+            parsedUrl.hostname === '127.0.0.1'
+          ) {
+            return callback(null, true);
+          }
+        } catch {
+          // ignore parsing error
+        }
+        return callback(new ApiError(403, 'Blocked by CORS policy', 'CORS_ERROR'));
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
     })
   );
 
