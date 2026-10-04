@@ -7,6 +7,7 @@ import { UserProfile, UserRole } from '@medisync/shared';
 declare global {
   namespace Express {
     interface Request {
+      id?: string;
       user?: {
         id: string;
         email?: string;

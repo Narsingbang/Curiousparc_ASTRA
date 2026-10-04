@@ -14,7 +14,7 @@
     "build:server": "esbuild server/src/vercel.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.js",
     "typecheck": "npm run typecheck --workspace=shared && npm run typecheck --workspace=server && npm run typecheck --workspace=client",
     "test": "vitest run",
-    "lint": "eslint . --ext .ts,.tsx --max-warnings 0",
+    "lint": "eslint . --max-warnings 0",
     "verify": "tsx scripts/e2e-smoke.ts",
     "seed:demo": "tsx scripts/seed-demo-users.ts",
     "check:secrets": "node scripts/check-secrets.mjs"
@@ -22,8 +22,10 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "esbuild": "^0.25.0",
+    "eslint": "^10.12.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
+    "typescript-eslint": "^8.71.0",
     "vitest": "^3.0.7"
   }
 }

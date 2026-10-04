@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { apiFetch } from '../../lib/api';
 import { useUiStore } from '../../store/uiStore';
 import { broadcastLiveEvent } from '../../hooks/useRealtime';
@@ -25,7 +25,12 @@ export function StaffInventoryStepper({
   onInventoryUpdated,
 }: StaffInventoryStepperProps) {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [optimisticInventory, setOptimisticInventory] = useState<InventoryItem[]>(inventory);
   const { addToast } = useUiStore();
+
+  useEffect(() => {
+    setOptimisticInventory(inventory);
+  }, [inventory]);
 
   const handleStep = async (item: InventoryItem, delta: number) => {
     const nextAvailable = item.available + delta;
@@ -39,6 +44,11 @@ export function StaffInventoryStepper({
       return;
     }
 
+    const prevInventory = [...optimisticInventory];
+    setOptimisticInventory((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, available: nextAvailable } : i))
+    );
+
     setUpdatingId(item.id);
     try {
       await apiFetch(`/staff/inventory/${item.id}`, {
@@ -49,10 +59,12 @@ export function StaffInventoryStepper({
       broadcastLiveEvent('inventory');
       onInventoryUpdated();
     } catch (err: any) {
+      // Roll back optimistic update on failure
+      setOptimisticInventory(prevInventory);
       addToast({
         type: 'error',
         title: 'Inventory Update Failed',
-        message: err.message,
+        message: err.message || 'Could not update inventory.',
       });
     } finally {
       setUpdatingId(null);
@@ -76,7 +88,7 @@ export function StaffInventoryStepper({
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {inventory.map((item) => {
+      {optimisticInventory.map((item) => {
         const ratio = item.total > 0 ? item.available / item.total : 0;
         const status = getResourceStatus(ratio);
 

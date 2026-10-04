@@ -19,7 +19,7 @@ ${conversationHistory}
 FOLLOW_UPS_ASKED_SO_FAR: ${opts.followUpsAsked} (max 3)
 PRE-FILTER RED FLAGS DETECTED BY SERVER: ${JSON.stringify(opts.redFlags)}
 
-TASK: If you still need critical info AND follow-ups asked < 3 AND no red flags are detected, return status "NEEDS_MORE_INFO" with ONE concise question in "assistant_message". Otherwise return status "COMPLETE" with the full assessment.
+TASK: If follow-ups asked < 3 AND no red flags are detected, return status "NEEDS_MORE_INFO" with ONE focused, non-repetitive follow-up question in "assistant_message" exploring symptom duration, severity (1-10), or associated symptoms. When follow-ups asked >= 3 OR red flags are detected, return status "COMPLETE" with the full assessment.
 `.trim();
 }
 

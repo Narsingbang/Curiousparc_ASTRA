@@ -12,6 +12,7 @@ import { supabaseAdmin, isMockSupabase } from '../lib/supabase';
 import { dbStore, DoctorRecord } from '../services/dataStore';
 import { logAudit, getRecentAuditLogs } from '../services/auditService';
 import { appCache } from '../lib/cache';
+import { logger } from '../lib/logger';
 
 export const staffRouter = Router();
 
@@ -56,7 +57,14 @@ staffRouter.patch(
       }
 
       // Check hospital match if staff is restricted to one hospital
-      if (staffHospitalId && doctor.hospital_id !== staffHospitalId) {
+      const isCentralHospital = (hId?: string | null) =>
+        hId === 'a0000000-0000-0000-0000-000000000001' ||
+        hId === 'd949b72a-2afa-4a1f-81ad-1d6d15865491';
+
+      const isCentralMatch =
+        isCentralHospital(staffHospitalId) && isCentralHospital(doctor.hospital_id);
+
+      if (!isCentralMatch && staffHospitalId && doctor.hospital_id !== staffHospitalId) {
         throw ApiError.forbidden('Cannot manage doctors from another hospital');
       }
 
@@ -82,7 +90,7 @@ staffRouter.patch(
           })
           .eq('id', id);
         if (updateError) {
-          console.error('Failed to update doctor in Supabase:', updateError);
+          throw updateError;
         }
       }
 
@@ -101,19 +109,23 @@ staffRouter.patch(
       // Invalidate dashboard summary cache
       appCache.invalidate('dashboard_summary');
 
-      await logAudit({
-        actorId: req.user!.id,
-        actorName: req.user!.profile.full_name,
-        action: 'DOCTOR_UPDATED',
-        entity: 'doctors',
-        entityId: id,
-        meta: {
-          doctor_name: doctor.full_name,
-          new_status: doctor.status,
-          previous_status: prevStatus,
-          waiting_count: doctor.waiting_count,
-        },
-      });
+      try {
+        await logAudit({
+          actorId: req.user!.id,
+          actorName: req.user!.profile.full_name,
+          action: 'DOCTOR_UPDATED',
+          entity: 'doctors',
+          entityId: id,
+          meta: {
+            doctor_name: doctor.full_name,
+            new_status: doctor.status,
+            previous_status: prevStatus,
+            waiting_count: doctor.waiting_count,
+          },
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr }, 'Audit log failed during doctor update, continuing');
+      }
 
       res.json({
         success: true,
@@ -180,14 +192,18 @@ staffRouter.post(
 
       appCache.invalidate('dashboard_summary');
 
-      await logAudit({
-        actorId: req.user!.id,
-        actorName: req.user!.profile.full_name,
-        action: 'DOCTOR_CREATED',
-        entity: 'doctors',
-        entityId: newDoctor.id,
-        meta: { doctor_name: newDoctor.full_name, specialty: newDoctor.specialty },
-      });
+      try {
+        await logAudit({
+          actorId: req.user!.id,
+          actorName: req.user!.profile.full_name,
+          action: 'DOCTOR_CREATED',
+          entity: 'doctors',
+          entityId: newDoctor.id,
+          meta: { doctor_name: newDoctor.full_name, specialty: newDoctor.specialty },
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr }, 'Audit log failed during doctor creation, continuing');
+      }
 
       res.status(201).json({ success: true, doctor: newDoctor });
     } catch (err) {
@@ -216,14 +232,18 @@ staffRouter.delete(
 
       appCache.invalidate('dashboard_summary');
 
-      await logAudit({
-        actorId: req.user!.id,
-        actorName: req.user!.profile.full_name,
-        action: 'DOCTOR_DELETED',
-        entity: 'doctors',
-        entityId: id,
-        meta: { doctor_name: doctor?.full_name },
-      });
+      try {
+        await logAudit({
+          actorId: req.user!.id,
+          actorName: req.user!.profile.full_name,
+          action: 'DOCTOR_DELETED',
+          entity: 'doctors',
+          entityId: id,
+          meta: { doctor_name: doctor?.full_name },
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr }, 'Audit log failed during doctor deletion, continuing');
+      }
 
       res.json({ success: true, message: 'Doctor deleted' });
     } catch (err) {
@@ -256,6 +276,19 @@ staffRouter.patch(
         throw ApiError.notFound('Inventory item not found');
       }
 
+      // Check hospital match if staff is restricted to one hospital
+      const staffHospitalId = req.user?.hospital_id;
+      const isCentralHospital = (hId?: string | null) =>
+        hId === 'a0000000-0000-0000-0000-000000000001' ||
+        hId === 'd949b72a-2afa-4a1f-81ad-1d6d15865491';
+
+      const isCentralInvMatch =
+        isCentralHospital(staffHospitalId) && isCentralHospital(item.hospital_id);
+
+      if (!isCentralInvMatch && staffHospitalId && item.hospital_id !== staffHospitalId) {
+        throw ApiError.forbidden('Cannot manage inventory from another hospital');
+      }
+
       const finalTotal = total !== undefined ? total : item.total;
       if (available > finalTotal) {
         throw ApiError.badRequest('Available count cannot exceed total count');
@@ -275,7 +308,7 @@ staffRouter.patch(
           })
           .eq('id', id);
         if (updateError) {
-          console.error('Failed to update inventory in Supabase:', updateError);
+          throw updateError;
         }
       }
 
@@ -289,14 +322,18 @@ staffRouter.patch(
 
       appCache.invalidate('dashboard_summary');
 
-      await logAudit({
-        actorId: req.user!.id,
-        actorName: req.user!.profile.full_name,
-        action: 'INVENTORY_UPDATED',
-        entity: 'inventory',
-        entityId: id,
-        meta: { type: item.type, available: item.available, total: item.total },
-      });
+      try {
+        await logAudit({
+          actorId: req.user!.id,
+          actorName: req.user!.profile.full_name,
+          action: 'INVENTORY_UPDATED',
+          entity: 'inventory',
+          entityId: id,
+          meta: { type: item.type, available: item.available, total: item.total },
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr }, 'Audit log failed during inventory update, continuing');
+      }
 
       res.json({ success: true, inventory: item });
     } catch (err) {

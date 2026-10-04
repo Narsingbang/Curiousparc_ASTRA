@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express, { Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -10,6 +11,17 @@ import { ApiError } from './lib/errors';
 
 export function createApp(): Express {
   const app = express();
+
+  // Attach unique Request ID to every request and response header
+  app.use((req, res, next) => {
+    const incoming =
+      (req.headers['x-request-id'] as string) ||
+      (req.headers['x-correlation-id'] as string);
+    const reqId = incoming || crypto.randomUUID();
+    req.id = reqId;
+    res.setHeader('X-Request-Id', reqId);
+    next();
+  });
 
   // Trust first proxy for correct client IP detection on Vercel / reverse proxies
   app.set('trust proxy', 1);

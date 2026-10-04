@@ -26,6 +26,11 @@ const inMemoryAuditLogs: AuditLogEntry[] = [
   },
 ];
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUuid(id?: string | null): boolean {
+  return typeof id === 'string' && UUID_REGEX.test(id);
+}
+
 export async function logAudit(opts: {
   actorId?: string | null;
   actorName?: string;
@@ -50,15 +55,38 @@ export async function logAudit(opts: {
 
   if (!isMockSupabase) {
     try {
-      await supabaseAdmin.from('audit_logs').insert({
-        actor_id: opts.actorId ?? null,
+      // In Supabase schema, audit_logs.actor_id and audit_logs.entity_id are UUID columns.
+      // If an ID is not a valid UUID (e.g., demo string 'demo-staff-id', 'i00000...'),
+      // pass null to avoid Postgres 22P02 syntax errors, while preserving the raw ID in meta.
+      const safeActorId = isValidUuid(opts.actorId) ? opts.actorId : null;
+      const safeEntityId = isValidUuid(opts.entityId) ? opts.entityId : null;
+
+      const { error } = await supabaseAdmin.from('audit_logs').insert({
+        actor_id: safeActorId,
         action: opts.action,
         entity: opts.entity,
-        entity_id: opts.entityId ?? null,
-        meta: opts.meta || {},
+        entity_id: safeEntityId,
+        meta: {
+          ...opts.meta,
+          ...(opts.actorId && !safeActorId ? { raw_actor_id: opts.actorId } : {}),
+          ...(opts.entityId && !safeEntityId ? { raw_entity_id: opts.entityId } : {}),
+          ...(opts.actorName ? { actor_name: opts.actorName } : {}),
+        },
       });
+
+      if (error) {
+        // An audit log failure must NOT block the main update (log it and continue)
+        logger.warn(
+          { error: error.message, code: error.code },
+          'Supabase audit log insert returned error, ignoring so main operation succeeds'
+        );
+      }
     } catch (err: any) {
-      logger.error({ err: err.message }, 'Failed to write audit log to Supabase');
+      // An audit log failure must NOT block the main update (log it and continue)
+      logger.warn(
+        { err: err.message },
+        'Audit logging encountered an exception, ignoring so main operation succeeds'
+      );
     }
   }
 }

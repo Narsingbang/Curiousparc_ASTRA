@@ -37,6 +37,9 @@ const SUGGESTION_CHIPS = [
   'Low grade fever with headache and mild fatigue',
 ];
 
+const SESSION_STORAGE_ID_KEY = 'medisync_triage_session_id';
+const SESSION_STORAGE_TOKEN_KEY = 'medisync_triage_session_token';
+
 export function ChatWindow() {
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -49,8 +52,12 @@ export function ChatWindow() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
-  const [sessionToken, setSessionToken] = useState<string | undefined>(undefined);
+  const [sessionId, setSessionId] = useState<string | undefined>(() => {
+    return sessionStorage.getItem(SESSION_STORAGE_ID_KEY) || undefined;
+  });
+  const [sessionToken, setSessionToken] = useState<string | undefined>(() => {
+    return sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY) || undefined;
+  });
   const [assessment, setAssessment] = useState<TriageAssessment | null>(null);
   const [routedDoctor, setRoutedDoctor] = useState<RoutedDoctor | null>(null);
   const [showEmergencyBanner, setShowEmergencyBanner] = useState(false);
@@ -99,9 +106,15 @@ export function ChatWindow() {
         }),
       });
 
-      // Update session tokens
-      setSessionId(res.session_id);
-      setSessionToken(res.session_token);
+      // Update session tokens in React state and sessionStorage
+      if (res.session_id) {
+        setSessionId(res.session_id);
+        sessionStorage.setItem(SESSION_STORAGE_ID_KEY, res.session_id);
+      }
+      if (res.session_token) {
+        setSessionToken(res.session_token);
+        sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, res.session_token);
+      }
 
       if (res.is_fallback) {
         setIsFallback(true);
@@ -164,9 +177,12 @@ export function ChatWindow() {
     setInput('');
     setSessionId(undefined);
     setSessionToken(undefined);
+    sessionStorage.removeItem(SESSION_STORAGE_ID_KEY);
+    sessionStorage.removeItem(SESSION_STORAGE_TOKEN_KEY);
     setAssessment(null);
     setRoutedDoctor(null);
     setShowEmergencyBanner(false);
+    setIsFallback(false);
   };
 
   return (
@@ -203,6 +219,14 @@ export function ChatWindow() {
             <RotateCcw className="w-4 h-4" />
           </button>
         </div>
+
+        {/* AI Fallback Note */}
+        {isFallback && (
+          <div className="mx-6 mt-3 py-1.5 px-3.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-medium flex items-center justify-center gap-2 self-center shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span>AI is busy, showing basic guidance</span>
+          </div>
+        )}
 
         {/* Message Stream */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">

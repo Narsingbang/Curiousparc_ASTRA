@@ -35,6 +35,38 @@ export function verifySessionToken(sessionId: string, token: string): boolean {
   }
 }
 
+interface FallbackQuestion {
+  key: string;
+  question: string;
+  matches: (text: string) => boolean;
+}
+
+const FALLBACK_QUESTIONS: FallbackQuestion[] = [
+  {
+    key: 'duration',
+    question:
+      'Could you tell me how long you have had these symptoms (e.g. hours, days, or weeks)?',
+    matches: (t: string) =>
+      t.includes('how long') || t.includes('hours, days') || t.includes('duration'),
+  },
+  {
+    key: 'severity',
+    question:
+      'On a scale of 1 to 10 (with 1 being very mild and 10 being severe/unbearable), how intense is your discomfort right now?',
+    matches: (t: string) =>
+      t.includes('1 to 10') || t.includes('scale') || t.includes('how intense'),
+  },
+  {
+    key: 'other_symptoms',
+    question:
+      'Are you experiencing any other symptoms, such as fever, dizziness, nausea, or localized weakness?',
+    matches: (t: string) =>
+      t.includes('other symptoms') ||
+      t.includes('fever, dizziness') ||
+      t.includes('associated symptoms'),
+  },
+];
+
 export async function processTriageMessage(opts: {
   sessionId?: string;
   sessionToken?: string;
@@ -53,15 +85,23 @@ export async function processTriageMessage(opts: {
       throw ApiError.unauthorized('Invalid or missing triage session token');
     }
 
-    if (isMockSupabase) {
+    if (!isMockSupabase) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('triage_sessions')
+          .select('*')
+          .eq('id', sessionId)
+          .maybeSingle();
+        if (data && !error) {
+          session = data as TriageSessionDbRecord;
+        }
+      } catch (err: any) {
+        logger.warn({ err: err.message }, 'Failed to fetch triage session from Supabase, checking memory');
+      }
+    }
+
+    if (!session) {
       session = dbStore.triageSessions.find((s) => s.id === sessionId) || null;
-    } else {
-      const { data } = await supabaseAdmin
-        .from('triage_sessions')
-        .select('*')
-        .eq('id', sessionId)
-        .single();
-      if (data) session = data as TriageSessionDbRecord;
     }
 
     if (!session || session.status === 'EXPIRED') {
@@ -158,6 +198,7 @@ export async function processTriageMessage(opts: {
       routed_doctor: docResult.routedDoctor,
       emergency_banner: true,
       follow_ups_remaining: 0,
+      is_fallback: false,
     };
   }
 
@@ -195,7 +236,7 @@ export async function processTriageMessage(opts: {
           advice: aiRes.assessment.advice ?? [],
         };
       } else {
-        assessment = createRuleBasedAssessment(opts.message, scan.detectedFlags);
+        assessment = createRuleBasedAssessment(fullText, scan.detectedFlags);
       }
     } else {
       turnStatus = 'NEEDS_MORE_INFO';
@@ -205,17 +246,27 @@ export async function processTriageMessage(opts: {
     logger.warn({ err: err.message }, 'Gemini triage unavailable, running rule-based fallback');
     isFallback = true;
 
-    if (!mustComplete && followUpsAsked === 0 && !scan.hasRedFlag) {
-      turnStatus = 'NEEDS_MORE_INFO';
-      assistantMessage =
-        'Could you tell me how long you have had these symptoms and whether you have any fever or difficulty breathing?';
-    } else {
+    // Previous assistant questions in this session
+    const previousAssistantTexts = session.messages
+      .filter((m) => m.role === 'assistant')
+      .map((m) => m.text.toLowerCase());
+
+    // Find the next question from the fixed list that has not been asked yet
+    const nextUnasked = FALLBACK_QUESTIONS.find(
+      (q) => !previousAssistantTexts.some((prev) => q.matches(prev))
+    );
+
+    // If red-flag detected, or 3 follow-ups already asked, or all 3 questions exhausted: COMPLETE
+    if (scan.hasRedFlag || followUpsAsked >= 3 || !nextUnasked) {
       turnStatus = 'COMPLETE';
-      assessment = createRuleBasedAssessment(opts.message, scan.detectedFlags);
+      assessment = createRuleBasedAssessment(fullText, scan.detectedFlags);
       assistantMessage =
         assessment.severity === 'SEVERE'
-          ? 'Based on your symptoms, immediate medical attention is strongly advised. We have routed you to an on-duty specialist.'
-          : 'Thank you for providing the details. Based on your symptoms, we have routed you to an available medical intern for initial assessment.';
+          ? 'Based on your symptoms, prompt medical evaluation by a specialist is advised. We have routed your case accordingly.'
+          : 'Thank you for providing the details about your symptoms. Based on your responses, we have routed you to an available medical intern for initial care.';
+    } else {
+      turnStatus = 'NEEDS_MORE_INFO';
+      assistantMessage = nextUnasked.question;
     }
   }
 

@@ -61,7 +61,7 @@ export const useUiStore = create<UiState>((set) => ({
     set((state) => {
       // De-duplicate: do not add duplicate toast if one with identical message already exists
       const isDuplicate = state.toasts.some(
-        (t) => t.message === toast.message && t.type === toast.type
+        (t) => t.message.trim().toLowerCase() === toast.message.trim().toLowerCase()
       );
       if (isDuplicate) {
         shouldAdd = false;

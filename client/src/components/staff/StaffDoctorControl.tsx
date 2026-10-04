@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DoctorStatus, DOCTOR_STATUSES } from '@medisync/shared';
 import { apiFetch } from '../../lib/api';
 import { useUiStore } from '../../store/uiStore';
@@ -18,9 +18,18 @@ export function StaffDoctorControl({
   onDoctorsUpdated,
 }: StaffDoctorControlProps) {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [optimisticDoctors, setOptimisticDoctors] = useState<DoctorListItem[]>(doctors);
   const { addToast } = useUiStore();
 
+  useEffect(() => {
+    setOptimisticDoctors(doctors);
+  }, [doctors]);
+
   const handleStatusChange = async (doctor: DoctorListItem, status: DoctorStatus) => {
+    const prevDoctors = [...optimisticDoctors];
+    setOptimisticDoctors((prev) =>
+      prev.map((d) => (d.id === doctor.id ? { ...d, status } : d))
+    );
     setUpdatingId(doctor.id);
     try {
       await apiFetch(`/staff/doctors/${doctor.id}`, {
@@ -37,6 +46,8 @@ export function StaffDoctorControl({
       broadcastLiveEvent('doctors');
       onDoctorsUpdated();
     } catch (err: any) {
+      // Roll back optimistic update on failure
+      setOptimisticDoctors(prevDoctors);
       addToast({
         type: 'error',
         title: 'Status Update Failed',
@@ -56,6 +67,10 @@ export function StaffDoctorControl({
     const nextVal = Math.max(0, currentVal + delta);
     if (nextVal === currentVal) return;
 
+    const prevDoctors = [...optimisticDoctors];
+    setOptimisticDoctors((prev) =>
+      prev.map((d) => (d.id === doctor.id ? { ...d, [field]: nextVal } : d))
+    );
     setUpdatingId(doctor.id);
     try {
       await apiFetch(`/staff/doctors/${doctor.id}`, {
@@ -66,6 +81,8 @@ export function StaffDoctorControl({
       broadcastLiveEvent('doctors');
       onDoctorsUpdated();
     } catch (err: any) {
+      // Roll back optimistic update on failure
+      setOptimisticDoctors(prevDoctors);
       addToast({
         type: 'error',
         title: 'Queue Update Failed',
@@ -100,7 +117,7 @@ export function StaffDoctorControl({
 
   return (
     <div className="space-y-4">
-      {doctors.map((doc) => (
+      {optimisticDoctors.map((doc) => (
         <div
           key={doc.id}
           className="p-5 rounded-3xl bg-white dark:bg-navy-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4"

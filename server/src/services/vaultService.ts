@@ -122,31 +122,35 @@ export async function createPatientRecord(
   };
 
   if (!isMockSupabase && isValidUuid(userId)) {
-    try {
-      const docId = isValidUuid(newRecord.doctor_id) ? newRecord.doctor_id : null;
-      const sessId = isValidUuid(newRecord.triage_session_id) ? newRecord.triage_session_id : null;
+    const docId = isValidUuid(newRecord.doctor_id) ? newRecord.doctor_id : null;
+    const sessId = isValidUuid(newRecord.triage_session_id) ? newRecord.triage_session_id : null;
 
-      const { data, error } = await supabaseAdmin
-        .from('patient_records')
-        .insert({
-          user_id: userId,
-          source: newRecord.source,
-          title: newRecord.title,
-          symptoms: newRecord.symptoms,
-          severity: newRecord.severity,
-          ai_summary: newRecord.ai_summary,
-          doctor_id: docId,
-          triage_session_id: sessId,
-          notes: newRecord.notes,
-        })
-        .select()
-        .single();
+    const { data, error } = await supabaseAdmin
+      .from('patient_records')
+      .insert({
+        user_id: userId,
+        source: newRecord.source,
+        title: newRecord.title,
+        symptoms: newRecord.symptoms,
+        severity: newRecord.severity,
+        ai_summary: newRecord.ai_summary,
+        doctor_id: docId,
+        triage_session_id: sessId,
+        notes: newRecord.notes,
+      })
+      .select()
+      .single();
 
-      if (!error && data) {
-        newRecord.id = data.id;
+    if (error) {
+      // If user_id is not in auth.users (foreign key 23503), allow in-memory fallback for local demo
+      if (error.code === '23503' && error.message.includes('patient_records_user_id_fkey')) {
+        logger.warn({ error: error.message }, 'User ID not in auth.users, persisting in memory store');
+      } else {
+        logger.error({ error, userId }, 'Failed to insert patient record into Supabase');
+        throw error;
       }
-    } catch (err: any) {
-      logger.warn({ err: err.message }, 'Failed to insert patient record to Supabase, keeping in memory');
+    } else if (data) {
+      newRecord.id = data.id;
     }
   }
 
@@ -177,23 +181,24 @@ export async function updatePatientRecord(
   }
 
   if (!isMockSupabase && isValidUuid(recordId) && isValidUuid(userId)) {
-    try {
-      const { data, error } = await supabaseAdmin
-        .from('patient_records')
-        .update({
-          ...input,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', recordId)
-        .eq('user_id', userId)
-        .select()
-        .single();
+    const { data, error } = await supabaseAdmin
+      .from('patient_records')
+      .update({
+        ...input,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', recordId)
+      .eq('user_id', userId)
+      .select()
+      .single();
 
-      if (!error && data) {
-        return data as PatientRecord;
-      }
-    } catch (err: any) {
-      logger.warn({ err: err.message }, 'Failed to update patient record in Supabase');
+    if (error) {
+      logger.error({ error, recordId, userId }, 'Failed to update patient record in Supabase');
+      throw error;
+    }
+
+    if (data) {
+      return data as PatientRecord;
     }
   }
 
@@ -221,17 +226,17 @@ export async function deletePatientRecord(
   }
 
   if (!isMockSupabase && isValidUuid(recordId) && isValidUuid(userId)) {
-    try {
-      const { error } = await supabaseAdmin
-        .from('patient_records')
-        .delete()
-        .eq('id', recordId)
-        .eq('user_id', userId);
+    const { error } = await supabaseAdmin
+      .from('patient_records')
+      .delete()
+      .eq('id', recordId)
+      .eq('user_id', userId);
 
-      if (!error) found = true;
-    } catch (err: any) {
-      logger.warn({ err: err.message }, 'Failed to delete record from Supabase');
+    if (error) {
+      logger.error({ error, recordId, userId }, 'Failed to delete record from Supabase');
+      throw error;
     }
+    found = true;
   }
 
   if (!found) {

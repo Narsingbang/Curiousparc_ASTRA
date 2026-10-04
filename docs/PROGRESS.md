@@ -177,3 +177,136 @@ Exit code: 0 (No type errors)
   3. Integrated `broadcastLiveEvent('patient_records')` into `RecordModal.tsx`.
   4. Deployed fix to Vercel production (`https://medisync-ai-alpha.vercel.app`) and verified `POST /api/vault/records` returns HTTP 201 Created.
 
+---
+
+## 5. Write Operations Shared Root Cause & Error Handling Resolution
+
+### A. Express Error Handler & Diagnostic Logging
+- **Problem**: Unexpected errors surfaced generic 500 responses without actionable traces or request correlation, making triage difficult.
+- **Fix**:
+  - Implemented structured request tracking via `crypto.randomUUID()` assigned to `req.id` and returned in `X-Request-Id` response header.
+  - Enhanced `server/src/middleware/errorHandler.ts` to log comprehensive error payloads via Pino (`message`, `code`, `details`, `hint`, `stack`, `route`, `method`, `requestId`) while redacting all sensitive patient health data.
+  - Mapped PostgreSQL / Supabase error codes to semantic HTTP status codes:
+    - `23505` (unique violation) -> HTTP 409 Conflict
+    - `23503` (foreign key violation) -> HTTP 400 Bad Request
+    - `23514` (check constraint violation) -> HTTP 400 Bad Request
+    - `22P02` (invalid text representation / UUID syntax) -> HTTP 400 Bad Request
+    - `42501` (insufficient privilege / RLS failure) -> HTTP 403 Forbidden
+    - `PGRST116` (row not found) -> HTTP 404 Not Found
+  - Client receives clean JSON with `error.code`, `error.message`, and `error.requestId` / `request_id`.
+
+### B. Shared Root Cause Analysis
+1. **Supabase Client Configuration**:
+   - Verified `supabaseAdmin` in `server/src/lib/supabase.ts` uses `SUPABASE_SERVICE_ROLE_KEY` with `auth: { persistSession: false, autoRefreshToken: false }`.
+2. **Audit Logging Rejection Resilience**:
+   - In `audit_logs`, `actor_id` and `entity_id` columns require `UUID`. Passing demo non-UUID identifiers (e.g. `demo-staff-id`, `i0000000-...`) triggered Postgres `22P02` syntax rejections.
+   - Fixed `server/src/services/auditService.ts` to validate UUIDs, passing `null` for foreign keys while preserving original IDs in `meta`.
+   - Enclosed all `logAudit` invocations in `server/src/routes/staff.ts` within `try/catch` handlers that log warnings on audit failure without blocking doctor status/waiting queue or inventory updates.
+3. **Hospital ID Aliasing in Staff Console**:
+   - Demo staff profile was assigned MediSync Central Hospital ID `d949b72a-2afa-4a1f-81ad-1d6d15865491`, while in-memory fallback used alias `a0000000-0000-0000-0000-000000000001`. Added hospital ID normalization so demo staff updates pass authorization checks without 403 Forbidden.
+4. **Health Vault UUID Safety**:
+   - `server/src/services/vaultService.ts` validates UUIDs before Postgres queries, falls back gracefully to in-memory store for demo users, checks all `insertError`/`updateError`/`deleteError` responses, and throws mapped errors.
+
+### C. Frontend Resilience & Toast De-duplication
+- **Toast Notifications**: Enhanced `client/src/store/uiStore.ts` to deduplicate toasts by trimmed, case-insensitive message, limit visible toasts to 3, and auto-dismiss after 4000ms.
+- **Optimistic Updates & Automatic Rollback**:
+  - `StaffDoctorControl.tsx`: Holds previous state (`prevStatus`, `prevWaiting`) and rolls back if the network request fails, rendering `err?.response?.data?.message || err?.message`.
+  - `StaffInventoryStepper.tsx`: Holds previous `available` count and rolls back on failure with server error display.
+
+---
+
+## 6. AI Triage Conversation Continuity & Smart Fallback
+
+### A. Repetitive Response Root Cause & Fix
+- **Root Cause**:
+  1. In the client `ChatWindow.tsx`, each user message was sent without attaching `session_id` and `session_token`, causing the server to initialize a brand-new session on every turn without conversational context.
+  2. The server's fallback response returned a static template asking "Could you describe your main symptom, how long you've had it, and how severe it is?" repeatedly on every turn.
+- **Fixes Applied**:
+  - **Client-Side Session Retention**: `ChatWindow.tsx` extracts `session_id` and `session_token` from the initial response, saves them in both React state and `sessionStorage`, and includes them in every subsequent message payload.
+  - **New Chat Reset**: Clicking "New Assessment" clears React state, removes items from `sessionStorage`, and restarts the session lifecycle.
+  - **Server-Side History Loading**: `server/src/services/triageService.ts` loads prior messages by `session_id`, verifies `session_token` (rejecting invalid/mismatched tokens with HTTP 401 Unauthorized), appends the user message, and sends the complete conversation history to Gemini.
+  - **Non-Repeating Smart Fallback**:
+    - Defines structured fallback questions:
+      1. Duration & onset: `"How many hours or days have you been experiencing these symptoms, and did they start suddenly or gradually?"`
+      2. Severity (1–10) & daily impact: `"On a scale of 1 to 10, how would you rate your discomfort or pain, and does it interfere with eating, sleeping, or breathing?"`
+      3. Associated / systemic symptoms: `"Are you experiencing any other symptoms, such as fever, rash, nausea, chills, or dizziness?"`
+    - Checks prior assistant messages to ensure no question is repeated.
+    - Limits follow-ups to at most 3 questions; if 3 follow-ups are reached, red flags are detected, or the patient provides comprehensive info, it returns `status: "COMPLETE"` with severity, routed doctor, and clinical summary.
+  - **Fallback Advisory**: `ChatWindow.tsx` displays `"AI is busy, showing basic guidance"` when `is_fallback: true`.
+
+---
+
+## 7. Automated Test & Verification Results
+
+### 1. Test Suite Execution (`npm test`)
+```
+ RUN  v3.2.7 C:/Users/bangn/medisync AI 2
+
+ ✓ server/src/__tests__/emergencyStateMachine.test.ts (4 tests)
+ ✓ server/src/__tests__/hospitalRanking.test.ts (3 tests)
+ ✓ server/src/__tests__/triageRouting.test.ts (7 tests)
+ ✓ server/src/__tests__/redFlags.test.ts (3 tests)
+ ✓ server/src/__tests__/security.test.ts (3 tests)
+ ✓ server/src/__tests__/writeOperations.test.ts (5 tests)
+   ✓ updates doctor waiting_count successfully
+   ✓ updates inventory successfully when available <= total
+   ✓ rejects inventory update when available > total with 400 Bad Request
+   ✓ creates, updates, and deletes a vault record successfully
+   ✓ ensures audit logging failure does NOT cause the doctor update to fail
+ ✓ server/src/__tests__/triageConversation.test.ts (2 tests)
+   ✓ rejects a triage message with an invalid session_token with 401 Unauthorized
+   ✓ conducts a 4-message conversation producing different replies and ending in COMPLETE after at most 3 follow-ups
+
+ Test Files  7 passed (7)
+      Tests  27 passed (27)
+   Duration  32.28s
+```
+
+### 2. TypeScript Typecheck (`npm run typecheck`)
+```
+> medisync-ai@1.0.0 typecheck
+> npm run typecheck --workspace=shared && npm run typecheck --workspace=server && npm run typecheck --workspace=client
+
+> @medisync/shared@1.0.0 typecheck
+> tsc --noEmit
+
+> @medisync/server@1.0.0 typecheck
+> tsc --noEmit
+
+> @medisync/client@1.0.0 typecheck
+> tsc --noEmit
+```
+(Exit Code 0 — 0 errors)
+
+### 3. Code Quality Lint (`npm run lint`)
+```
+> medisync-ai@1.0.0 lint
+> eslint . --max-warnings 0
+```
+(Exit Code 0 — 0 errors, 0 warnings)
+
+### 4. End-to-End Smoke Verification (`npm run verify`)
+```
+═══════════════════════════════════════════════════════════════════════════
+📋 MEDISYNC AI E2E VERIFICATION TEST MATRIX
+═══════════════════════════════════════════════════════════════════════════
+✅  PASS   | GET /api/health
+✅  PASS   | GET /api/dashboard/summary shape
+✅  PASS   | GET /api/doctors (city=Pune)
+✅  PASS   | GET /api/inventory
+✅  PASS   | POST /api/triage/message (Mild Case)
+✅  PASS   | POST /api/triage/message (Severe Case Override)
+✅  PASS   | POST /api/emergency-requests
+✅  PASS   | PATCH /api/emergency-requests/:id/status (Illegal Transition -> 409)
+✅  PASS   | PATCH /api/emergency-requests/:id/status (Legal Transition -> 200)
+✅  PASS   | PATCH /api/staff/inventory/:id (Staff Stepper -> 200)
+✅  PASS   | PATCH /api/staff/inventory/:id (available > total -> 400)
+✅  PASS   | POST /api/auth/claim-staff (Invalid Code -> 403)
+✅  PASS   | GET /api/vault (Authorized User Records)
+✅  PASS   | GET /api/vault/export (JSON download format)
+═══════════════════════════════════════════════════════════════════════════
+
+🎉 ALL E2E SMOKE & VERIFICATION TESTS PASSED (100% SUCCESS)!
+```
+
+
