@@ -8,6 +8,12 @@ import {
 import { supabaseAdmin, isMockSupabase } from '../lib/supabase';
 import { dbStore, PatientRecordDbRecord } from './dataStore';
 import { ApiError } from '../lib/errors';
+import { logger } from '../lib/logger';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUuid(id?: string | null): boolean {
+  return typeof id === 'string' && UUID_REGEX.test(id);
+}
 
 export async function getVaultData(
   userId: string,
@@ -20,32 +26,41 @@ export async function getVaultData(
   records: PatientRecord[];
   stats: { total: number; mild: number; severe: number };
 }> {
-  let records: PatientRecordDbRecord[] = [];
+  let records: any[] = [];
 
-  if (isMockSupabase) {
-    records = dbStore.patientRecords.filter((r) => r.user_id === userId);
-  } else {
-    let query = supabaseAdmin
-      .from('patient_records')
-      .select('*, doctors(full_name, specialty, hospitals(name))')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+  if (!isMockSupabase && isValidUuid(userId)) {
+    try {
+      let query = supabaseAdmin
+        .from('patient_records')
+        .select('*, doctors(full_name, specialty, hospitals(name))')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
 
-    if (opts?.severity) {
-      query = query.eq('severity', opts.severity);
-    }
-    if (opts?.from) {
-      query = query.gte('created_at', opts.from);
-    }
-    if (opts?.to) {
-      query = query.lte('created_at', opts.to);
-    }
+      if (opts?.severity) {
+        query = query.eq('severity', opts.severity);
+      }
+      if (opts?.from) {
+        query = query.gte('created_at', opts.from);
+      }
+      if (opts?.to) {
+        query = query.lte('created_at', opts.to);
+      }
 
-    const { data, error } = await query;
-    if (error || !data) {
-      records = dbStore.patientRecords.filter((r) => r.user_id === userId);
-    } else {
-      records = data as any;
+      const { data, error } = await query;
+      if (!error && data) {
+        records = data;
+      }
+    } catch (err: any) {
+      logger.warn({ err: err.message }, 'Failed to fetch vault records from Supabase, falling back to memory');
+    }
+  }
+
+  // Merge in-memory records for this user (deduplicating by ID)
+  for (const memRec of dbStore.patientRecords) {
+    if (memRec.user_id === userId && !records.some((r) => r.id === memRec.id)) {
+      if (!opts?.severity || memRec.severity === opts.severity) {
+        records.push(memRec);
+      }
     }
   }
 
@@ -53,6 +68,8 @@ export async function getVaultData(
   if (opts?.severity) {
     records = records.filter((r) => r.severity === opts.severity);
   }
+
+  records.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const mapped: PatientRecord[] = records.map((r: any) => ({
     id: r.id,
@@ -104,31 +121,37 @@ export async function createPatientRecord(
     updated_at: new Date().toISOString(),
   };
 
-  if (isMockSupabase) {
-    dbStore.patientRecords.unshift(newRecord);
-  } else {
-    const { data, error } = await supabaseAdmin
-      .from('patient_records')
-      .insert({
-        user_id: userId,
-        source: newRecord.source,
-        title: newRecord.title,
-        symptoms: newRecord.symptoms,
-        severity: newRecord.severity,
-        ai_summary: newRecord.ai_summary,
-        doctor_id: newRecord.doctor_id,
-        triage_session_id: newRecord.triage_session_id,
-        notes: newRecord.notes,
-      })
-      .select()
-      .single();
+  if (!isMockSupabase && isValidUuid(userId)) {
+    try {
+      const docId = isValidUuid(newRecord.doctor_id) ? newRecord.doctor_id : null;
+      const sessId = isValidUuid(newRecord.triage_session_id) ? newRecord.triage_session_id : null;
 
-    if (error || !data) {
-      dbStore.patientRecords.unshift(newRecord);
-    } else {
-      newRecord.id = data.id;
+      const { data, error } = await supabaseAdmin
+        .from('patient_records')
+        .insert({
+          user_id: userId,
+          source: newRecord.source,
+          title: newRecord.title,
+          symptoms: newRecord.symptoms,
+          severity: newRecord.severity,
+          ai_summary: newRecord.ai_summary,
+          doctor_id: docId,
+          triage_session_id: sessId,
+          notes: newRecord.notes,
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        newRecord.id = data.id;
+      }
+    } catch (err: any) {
+      logger.warn({ err: err.message }, 'Failed to insert patient record to Supabase, keeping in memory');
     }
   }
+
+  // Always keep in memory store for immediate consistency
+  dbStore.patientRecords.unshift(newRecord);
 
   return {
     ...newRecord,
@@ -141,62 +164,78 @@ export async function updatePatientRecord(
   recordId: string,
   input: RecordUpdateInput
 ): Promise<PatientRecord> {
-  if (isMockSupabase) {
-    const record = dbStore.patientRecords.find(
-      (r) => r.id === recordId && r.user_id === userId
-    );
-    if (!record) {
-      throw ApiError.notFound('Record not found or access denied');
+  const memRecord = dbStore.patientRecords.find(
+    (r) => r.id === recordId && r.user_id === userId
+  );
+
+  if (memRecord) {
+    if (input.title !== undefined) memRecord.title = input.title;
+    if (input.symptoms !== undefined) memRecord.symptoms = input.symptoms;
+    if (input.severity !== undefined) memRecord.severity = input.severity;
+    if (input.notes !== undefined) memRecord.notes = input.notes;
+    memRecord.updated_at = new Date().toISOString();
+  }
+
+  if (!isMockSupabase && isValidUuid(recordId) && isValidUuid(userId)) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('patient_records')
+        .update({
+          ...input,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', recordId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as PatientRecord;
+      }
+    } catch (err: any) {
+      logger.warn({ err: err.message }, 'Failed to update patient record in Supabase');
     }
-    if (input.title !== undefined) record.title = input.title;
-    if (input.symptoms !== undefined) record.symptoms = input.symptoms;
-    if (input.severity !== undefined) record.severity = input.severity;
-    if (input.notes !== undefined) record.notes = input.notes;
-    record.updated_at = new Date().toISOString();
-    return record;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('patient_records')
-    .update({
-      ...input,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', recordId)
-    .eq('user_id', userId)
-    .select()
-    .single();
-
-  if (error || !data) {
-    throw ApiError.notFound('Record not found or access denied');
+  if (memRecord) {
+    return {
+      ...memRecord,
+      doctor_name: null,
+    };
   }
 
-  return data as PatientRecord;
+  throw ApiError.notFound('Record not found or access denied');
 }
 
 export async function deletePatientRecord(
   userId: string,
   recordId: string
 ): Promise<void> {
-  if (isMockSupabase) {
-    const idx = dbStore.patientRecords.findIndex(
-      (r) => r.id === recordId && r.user_id === userId
-    );
-    if (idx === -1) {
-      throw ApiError.notFound('Record not found or access denied');
-    }
+  let found = false;
+  const idx = dbStore.patientRecords.findIndex(
+    (r) => r.id === recordId && r.user_id === userId
+  );
+  if (idx !== -1) {
     dbStore.patientRecords.splice(idx, 1);
-    return;
+    found = true;
   }
 
-  const { error } = await supabaseAdmin
-    .from('patient_records')
-    .delete()
-    .eq('id', recordId)
-    .eq('user_id', userId);
+  if (!isMockSupabase && isValidUuid(recordId) && isValidUuid(userId)) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('patient_records')
+        .delete()
+        .eq('id', recordId)
+        .eq('user_id', userId);
 
-  if (error) {
-    throw ApiError.internal('Failed to delete record');
+      if (!error) found = true;
+    } catch (err: any) {
+      logger.warn({ err: err.message }, 'Failed to delete record from Supabase');
+    }
+  }
+
+  if (!found) {
+    throw ApiError.notFound('Record not found or access denied');
   }
 }
 
@@ -204,41 +243,45 @@ export async function updateVaultProfile(
   userId: string,
   input: VaultProfileInput
 ): Promise<UserProfile> {
-  if (isMockSupabase) {
-    return {
-      id: userId,
-      full_name: input.full_name || 'Demo Patient',
-      role: 'patient',
-      phone: input.phone || null,
-      blood_group: input.blood_group || null,
-      allergies: input.allergies || [],
-      chronic_conditions: input.chronic_conditions || [],
-      emergency_contact: input.emergency_contact || null,
-    };
-  }
-
-  const updateFields: any = {
-    updated_at: new Date().toISOString(),
+  const profile: UserProfile = {
+    id: userId,
+    full_name: input.full_name || 'Demo Patient',
+    role: 'patient',
+    phone: input.phone || null,
+    blood_group: input.blood_group || null,
+    allergies: input.allergies || [],
+    chronic_conditions: input.chronic_conditions || [],
+    emergency_contact: input.emergency_contact || null,
   };
-  if (input.full_name) updateFields.full_name = input.full_name;
-  if (input.phone !== undefined) updateFields.phone = input.phone;
-  if (input.blood_group !== undefined) updateFields.blood_group = input.blood_group;
-  if (input.allergies !== undefined) updateFields.allergies = input.allergies;
-  if (input.chronic_conditions !== undefined)
-    updateFields.chronic_conditions = input.chronic_conditions;
-  if (input.emergency_contact !== undefined)
-    updateFields.emergency_contact = input.emergency_contact;
 
-  const { data, error } = await supabaseAdmin
-    .from('profiles')
-    .update(updateFields)
-    .eq('id', userId)
-    .select()
-    .single();
+  if (!isMockSupabase && isValidUuid(userId)) {
+    try {
+      const updateFields: any = {
+        updated_at: new Date().toISOString(),
+      };
+      if (input.full_name) updateFields.full_name = input.full_name;
+      if (input.phone !== undefined) updateFields.phone = input.phone;
+      if (input.blood_group !== undefined) updateFields.blood_group = input.blood_group;
+      if (input.allergies !== undefined) updateFields.allergies = input.allergies;
+      if (input.chronic_conditions !== undefined)
+        updateFields.chronic_conditions = input.chronic_conditions;
+      if (input.emergency_contact !== undefined)
+        updateFields.emergency_contact = input.emergency_contact;
 
-  if (error || !data) {
-    throw ApiError.badRequest('Failed to update profile');
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .update(updateFields)
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as UserProfile;
+      }
+    } catch (err: any) {
+      logger.warn({ err: err.message }, 'Failed to update profile in Supabase');
+    }
   }
 
-  return data as UserProfile;
+  return profile;
 }

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { RecordCreateInput, SeverityLevel } from '@medisync/shared';
 import { apiFetch } from '../../lib/api';
 import { useUiStore } from '../../store/uiStore';
+import { broadcastLiveEvent } from '../../hooks/useRealtime';
 import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -39,6 +40,8 @@ export function RecordModal({ isOpen, onClose, onRecordSaved }: RecordModalProps
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
+      broadcastLiveEvent('patient_records');
 
       addToast({
         type: 'success',

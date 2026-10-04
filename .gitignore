@@ -9,3 +9,4 @@ dist
 api/index.js
 coverage
 .cache
+.vercel
