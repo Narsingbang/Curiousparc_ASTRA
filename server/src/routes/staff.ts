@@ -90,6 +90,15 @@ staffRouter.patch(
           })
           .eq('id', id);
         if (updateError) {
+          logger.error(
+            {
+              message: updateError.message,
+              code: updateError.code,
+              details: updateError.details,
+              hint: updateError.hint,
+            },
+            'Supabase doctor update error'
+          );
           throw updateError;
         }
       }
@@ -308,6 +317,15 @@ staffRouter.patch(
           })
           .eq('id', id);
         if (updateError) {
+          logger.error(
+            {
+              message: updateError.message,
+              code: updateError.code,
+              details: updateError.details,
+              hint: updateError.hint,
+            },
+            'Supabase inventory update error'
+          );
           throw updateError;
         }
       }

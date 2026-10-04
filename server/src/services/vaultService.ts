@@ -146,7 +146,16 @@ export async function createPatientRecord(
       if (error.code === '23503' && error.message.includes('patient_records_user_id_fkey')) {
         logger.warn({ error: error.message }, 'User ID not in auth.users, persisting in memory store');
       } else {
-        logger.error({ error, userId }, 'Failed to insert patient record into Supabase');
+        logger.error(
+          {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            userId,
+          },
+          'Failed to insert patient record into Supabase'
+        );
         throw error;
       }
     } else if (data) {
@@ -193,7 +202,17 @@ export async function updatePatientRecord(
       .single();
 
     if (error) {
-      logger.error({ error, recordId, userId }, 'Failed to update patient record in Supabase');
+      logger.error(
+        {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          recordId,
+          userId,
+        },
+        'Failed to update patient record in Supabase'
+      );
       throw error;
     }
 

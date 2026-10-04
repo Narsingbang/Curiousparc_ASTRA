@@ -109,19 +109,21 @@ export function errorHandler(
   }
 
   // Unexpected Server Error (500)
-  // Full detail logged with Pino. Patient data (symptoms, body, patient notes) is NEVER logged.
+  // Full detail logged with Pino. Patient data is NEVER logged.
   logger.error(
     {
-      message: err.message,
-      code: (err as any).code,
-      details: (err as any).details,
-      hint: (err as any).hint,
-      stack: err.stack,
-      route: req.originalUrl || req.url,
+      err: {
+        message: err.message,
+        code: (err as any).code,
+        details: (err as any).details,
+        hint: (err as any).hint,
+        stack: err.stack,
+      },
       method: req.method,
+      path: req.originalUrl || req.url,
       requestId,
     },
-    'Unhandled server error'
+    'unhandled error'
   );
 
   res.status(500).json({
@@ -132,5 +134,7 @@ export function errorHandler(
       requestId,
       request_id: requestId,
     },
+    requestId,
+    request_id: requestId,
   });
 }
