@@ -33,12 +33,14 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const errorMsg =
+      data?.message ||
       data?.error?.message ||
       (typeof data === 'string' ? data : `Request failed with status ${response.status}`);
     const err = new Error(errorMsg);
     (err as any).status = response.status;
-    (err as any).code = data?.error?.code;
-    (err as any).details = data?.error?.details;
+    (err as any).code = data?.error?.code || data?.code;
+    (err as any).details = data?.error?.details || data?.details;
+    (err as any).requestId = data?.error?.requestId || data?.requestId || data?.request_id;
     throw err;
   }
 

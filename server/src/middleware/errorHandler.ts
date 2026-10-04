@@ -16,6 +16,7 @@ export function errorHandler(
 
   if (err instanceof ApiError) {
     res.status(err.statusCode).json({
+      message: err.message,
       error: {
         code: err.code,
         message: err.message,
@@ -29,6 +30,7 @@ export function errorHandler(
 
   if (err instanceof ZodError) {
     res.status(400).json({
+      message: 'Invalid request input data',
       error: {
         code: 'VALIDATION_ERROR',
         message: 'Invalid request input data',
@@ -42,6 +44,7 @@ export function errorHandler(
 
   if (err.name === 'SyntaxError' && 'body' in err) {
     res.status(400).json({
+      message: 'Malformed JSON payload',
       error: {
         code: 'INVALID_JSON',
         message: 'Malformed JSON payload',
@@ -93,6 +96,7 @@ export function errorHandler(
       );
 
       res.status(status).json({
+        message: err.message || 'Database operation failed',
         error: {
           code: mappedCode,
           message: err.message || 'Database operation failed',
@@ -121,6 +125,7 @@ export function errorHandler(
   );
 
   res.status(500).json({
+    message: 'An unexpected internal error occurred',
     error: {
       code: 'INTERNAL_SERVER_ERROR',
       message: 'An unexpected internal error occurred',

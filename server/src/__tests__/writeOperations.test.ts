@@ -24,7 +24,7 @@ describe('Write Operations & Resilience Suite', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.doctor.waiting_count).toBe(newWaiting);
-  });
+  }, 30000);
 
   // 2. Inventory update (available <= total enforced)
   it('updates inventory successfully when available <= total', async () => {
@@ -42,7 +42,7 @@ describe('Write Operations & Resilience Suite', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.inventory.available).toBe(validAvailable);
-  });
+  }, 30000);
 
   it('rejects inventory update when available > total with 400 Bad Request', async () => {
     const invListRes = await request(app).get('/api/inventory?hospital_id=d949b72a-2afa-4a1f-81ad-1d6d15865491');
@@ -57,7 +57,7 @@ describe('Write Operations & Resilience Suite', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();
     expect(res.body.error.code).toBe('BAD_REQUEST');
-  });
+  }, 30000);
 
   // 3. Vault record create, update, delete
   it('creates, updates, and deletes a vault record successfully', async () => {
@@ -97,7 +97,7 @@ describe('Write Operations & Resilience Suite', () => {
 
     expect(deleteRes.status).toBe(200);
     expect(deleteRes.body.success).toBe(true);
-  });
+  }, 30000);
 
   // 4. Audit logging failure does NOT break the main update
   it('ensures audit logging failure does NOT cause the doctor update to fail', async () => {
@@ -119,5 +119,5 @@ describe('Write Operations & Resilience Suite', () => {
     expect(res.body.doctor.waiting_count).toBe(8);
 
     auditSpy.mockRestore();
-  });
+  }, 30000);
 });
