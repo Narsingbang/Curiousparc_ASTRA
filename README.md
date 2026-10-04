@@ -1,8 +1,6 @@
 # MediSync AI (Curiousparc_ASTRA)
 
-> **"Live hospital availability + AI triage, in one unified platform."**  
-> Built for the **CURIOUSPARC 2026 State Innovation Challenge**  
-> **Team ASTRA**: Rushikesh Soni (Team Leader), Narsing Bang, Pawan Sankhla — *VIT Pune*
+> **"Live hospital availability + AI triage, in one unified platform."**
 
 ---
 
