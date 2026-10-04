@@ -162,3 +162,18 @@ Exit code: 0 (No type errors)
 
 🎉 ALL E2E SMOKE & VERIFICATION TESTS PASSED (100% SUCCESS)!
 ```
+
+---
+
+## 4. Vault Record Modal Resolution (Hotfix)
+
+- **Symptoms**: Clicking "Save to Vault" in `RecordModal.tsx` displayed an error toast: `Error Saving Record: An unexpected internal error occurred`.
+- **Root Cause**:
+  1. In `server/src/services/vaultService.ts`, `createPatientRecord` executed an unhandled `await supabaseAdmin.from('patient_records').insert(...)`. When demo users (e.g. `demo-patient-id`) or unlinked accounts saved a record, PostgreSQL returned error `22P02 invalid input syntax for type uuid: "demo-patient-id"`. Without a `try/catch` block, this uncaught error bubbled to Express's `errorHandler`, triggering HTTP 500 `INTERNAL_SERVER_ERROR`.
+  2. `RecordModal.tsx` lacked a real-time broadcast call on record save.
+- **Fix**:
+  1. Added `isValidUuid` validation for `userId`, `doctor_id`, and `triage_session_id` before querying Supabase.
+  2. Wrapped all Supabase mutations in `vaultService.ts` (`createPatientRecord`, `updatePatientRecord`, `deletePatientRecord`, `getVaultData`, `updateVaultProfile`) in `try/catch` safety blocks with dual-store memory sync.
+  3. Integrated `broadcastLiveEvent('patient_records')` into `RecordModal.tsx`.
+  4. Deployed fix to Vercel production (`https://medisync-ai-alpha.vercel.app`) and verified `POST /api/vault/records` returns HTTP 201 Created.
+
